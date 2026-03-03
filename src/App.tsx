@@ -17,6 +17,7 @@ import {
   OnboardingOverlay,
   BadPathModal,
 } from '@/components';
+import { BackgroundOverlay } from '@/components/BackgroundOverlay';
 import type { BadPathType } from '@/components';
 import {
   autoLoadInterface,
@@ -72,6 +73,8 @@ function App() {
   const [showVCRedistModal, setShowVCRedistModal] = useState(false);
   const [showBadPathModal, setShowBadPathModal] = useState(false);
   const [badPathType, setBadPathType] = useState<BadPathType>('root');
+  const [backgroundImageDataUrl, setBackgroundImageDataUrl] = useState<string | undefined>(undefined);
+  const blobUrlRef = useRef<string | undefined>(undefined);
 
   // 页面过渡状态
   const [isSettingsExiting, setIsSettingsExiting] = useState(false);
@@ -118,7 +121,64 @@ function App() {
     rightPanelCollapsed,
     setRightPanelWidth: _setRightPanelWidth,
     setRightPanelCollapsed: _setRightPanelCollapsed,
+    backgroundImage,
+    backgroundOpacity,
   } = useAppStore();
+
+  // 转换背景图片为 Blob URL
+  useEffect(() => {
+    if (!backgroundImage || !isTauri()) {
+      // 清理旧的 blob URL
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = undefined;
+      }
+      setBackgroundImageDataUrl(backgroundImage);
+      return;
+    }
+
+    const loadBackgroundImage = async () => {
+      try {
+        const { readFile } = await import('@tauri-apps/plugin-fs');
+        const fileData = await readFile(backgroundImage);
+
+        // 获取 MIME 类型
+        const ext = backgroundImage.split('.').pop()?.toLowerCase() || 'png';
+        const mimeMap: Record<string, string> = {
+          png: 'image/png',
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          webp: 'image/webp',
+        };
+        const mimeType = mimeMap[ext] || 'image/png';
+
+        // 创建 Blob 和 URL
+        const blob = new Blob([fileData], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+
+        // 清理旧的 blob URL
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+        }
+
+        blobUrlRef.current = blobUrl;
+        setBackgroundImageDataUrl(blobUrl);
+      } catch (err) {
+        log.warn('Failed to load background image:', err);
+        setBackgroundImageDataUrl(undefined);
+      }
+    };
+
+    loadBackgroundImage();
+
+    // 清理函数：组件卸载时释放 blob URL
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = undefined;
+      }
+    };
+  }, [backgroundImage]);
 
   // 带退出动画的设置页面关闭
   const closeSettingsWithAnimation = useCallback(() => {
@@ -1047,7 +1107,9 @@ function App() {
   // 设置页面
   if (currentPage === 'settings') {
     return (
-      <div className="h-full flex flex-col bg-bg-primary">
+      <div className={`h-full flex flex-col bg-bg-primary relative ${backgroundImageDataUrl ? 'has-background-image' : ''}`}>
+        <BackgroundOverlay imageDataUrl={backgroundImageDataUrl} opacity={backgroundOpacity} />
+        <div className="relative z-10 h-full flex flex-col">
         <TitleBar />
         {/* 安装确认模态框 - 在设置页面也需要能弹出 */}
         <InstallConfirmModal />
@@ -1057,7 +1119,7 @@ function App() {
         >
           <SettingsPage onClose={closeSettingsWithAnimation} />
         </div>
-        {/* 
+        {/*
           让全局快捷键（开始/结束任务）在设置页也能触发：
           Toolbar 内部监听 mxu-start-tasks / mxu-stop-tasks 并复用既有启动/停止逻辑。
           这里不显示 Toolbar，仅用于挂载快捷键处理逻辑。
@@ -1067,6 +1129,7 @@ function App() {
             showAddPanel={showAddTaskPanel}
             onToggleAddPanel={() => setShowAddTaskPanel(!showAddTaskPanel)}
           />
+        </div>
         </div>
       </div>
     );
@@ -1116,7 +1179,9 @@ function App() {
 
   // 主页面
   return (
-    <div className="h-full flex flex-col bg-bg-primary">
+    <div className={`h-full flex flex-col bg-bg-primary relative ${backgroundImageDataUrl ? 'has-background-image' : ''}`}>
+      <BackgroundOverlay imageDataUrl={backgroundImageDataUrl} opacity={backgroundOpacity} />
+      <div className="relative z-10 h-full flex flex-col">
       {/* 自定义标题栏 */}
       <TitleBar />
 
@@ -1224,6 +1289,7 @@ function App() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { type CSSProperties, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Palette } from 'lucide-react';
+import { Globe, Palette, Image } from 'lucide-react';
 import clsx from 'clsx';
 import {
   DndContext,
@@ -15,6 +15,7 @@ import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
 import { useAppStore } from '@/stores/appStore';
 import { getAccentInfoList, type AccentColor, type CustomAccent } from '@/themes';
 import { SortableAccentTile } from './SortableAccentTile';
+import { isTauri } from '@/utils/windowUtils';
 
 interface AppearanceSectionProps {
   onOpenCreateAccentModal: () => void;
@@ -37,6 +38,10 @@ export function AppearanceSection({
     reorderCustomAccents,
     language,
     setLanguage,
+    backgroundImage,
+    setBackgroundImage,
+    backgroundOpacity,
+    setBackgroundOpacity,
   } = useAppStore();
 
   // 获取强调色列表（包含自定义强调色）
@@ -200,6 +205,65 @@ export function AppearanceSection({
             </div>
           </SortableContext>
         </DndContext>
+      </div>
+
+      {/* 背景图片 */}
+      <div className="bg-bg-secondary rounded-xl p-4 border border-border space-y-4">
+        <div className="flex items-center gap-3 mb-3">
+          <Image className="w-5 h-5 text-accent" />
+          <span className="font-medium text-text-primary">{t('settings.backgroundImage')}</span>
+        </div>
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (!isTauri()) return;
+                try {
+                  const { open } = await import('@tauri-apps/plugin-dialog');
+                  const file = await open({
+                    multiple: false,
+                    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+                  });
+                  if (Array.isArray(file)) {
+                    if (file[0]) setBackgroundImage(file[0]);
+                  } else if (file) {
+                    setBackgroundImage(file);
+                  }
+                } catch (err) {
+                  console.error('Failed to select background image:', err);
+                }
+              }}
+              disabled={!isTauri()}
+              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {t('settings.selectBackgroundImage')}
+            </button>
+            {backgroundImage && (
+              <button
+                onClick={() => setBackgroundImage(undefined)}
+                className="px-4 py-2.5 rounded-lg text-sm font-medium bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors"
+              >
+                {t('settings.removeBackgroundImage')}
+              </button>
+            )}
+          </div>
+          {backgroundImage && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">{t('settings.backgroundOpacity')}</span>
+                <span className="text-sm text-text-primary font-medium">{backgroundOpacity}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={backgroundOpacity}
+                onChange={(e) => setBackgroundOpacity(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
