@@ -464,12 +464,14 @@ function App() {
         try {
           const { getCurrentWindow, availableMonitors } = await import('@tauri-apps/api/window');
           const monitors = await availableMonitors();
+          // monitor.position/size 是物理像素，需除以 scaleFactor 转为逻辑像素后再与保存的逻辑坐标比较
           // 允许窗口左上角稍微超出屏幕边缘（标题栏仍可见）
           const isOnScreen = monitors.some((m) => {
-            const mx = m.position.x;
-            const my = m.position.y;
-            const mw = m.size.width;
-            const mh = m.size.height;
+            const sf = m.scaleFactor;
+            const mx = m.position.x / sf;
+            const my = m.position.y / sf;
+            const mw = m.size.width / sf;
+            const mh = m.size.height / sf;
             return x >= mx - 100 && x < mx + mw && y >= my - 50 && y < my + mh;
           });
           if (isOnScreen) {
