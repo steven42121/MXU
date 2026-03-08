@@ -36,7 +36,7 @@ export function AboutSection() {
 
   const projectName =
     resolveI18nText(projectInterface?.label, translations) || projectInterface?.name || 'MXU';
-  const version = projectInterface?.version || '0.1.0';
+//   const version = projectInterface?.version || '0.1.0';
 
   // 解析内容（支持文件路径、URL、国际化）
   useEffect(() => {
