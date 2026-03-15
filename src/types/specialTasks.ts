@@ -73,6 +73,9 @@ export const MXU_POWER_TASK_NAME = '__MXU_POWER__';
 export const MXU_POWER_ENTRY = 'MXU_POWER';
 export const MXU_POWER_ACTION = 'MXU_POWER_ACTION';
 
+// 这类特殊任务不依赖游戏画面，固定 target 可避免在窗口消失后被空识别框拦截。
+const MXU_NON_VISUAL_CUSTOM_TARGET: [number, number, number, number] = [0, 0, 1, 1];
+
 // MXU_SLEEP 任务定义
 const MXU_SLEEP_TASK_DEF_INTERNAL: TaskItem = {
   name: MXU_SLEEP_TASK_NAME,
@@ -83,6 +86,7 @@ const MXU_SLEEP_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_SLEEP_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_SLEEP_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
@@ -120,6 +124,7 @@ const MXU_WAITUNTIL_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_WAITUNTIL_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_WAITUNTIL_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
@@ -157,6 +162,7 @@ const MXU_LAUNCH_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_LAUNCH_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_LAUNCH_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
@@ -266,6 +272,7 @@ const MXU_WEBHOOK_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_WEBHOOK_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_WEBHOOK_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
@@ -302,6 +309,7 @@ const MXU_NOTIFY_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_NOTIFY_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_NOTIFY_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
@@ -346,6 +354,7 @@ const MXU_KILLPROC_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_KILLPROC_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_KILLPROC_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
@@ -415,6 +424,7 @@ const MXU_POWER_TASK_DEF_INTERNAL: TaskItem = {
     [MXU_POWER_ENTRY]: {
       action: 'Custom',
       custom_action: MXU_POWER_ACTION,
+      target: MXU_NON_VISUAL_CUSTOM_TARGET,
     },
   },
 };
