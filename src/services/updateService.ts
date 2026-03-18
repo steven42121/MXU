@@ -12,6 +12,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import * as semver from 'semver';
 
+import { backupConfigBeforeUpdate } from './configService';
 import { downloadWithProxy } from './proxyService';
 
 const log = loggers.app;
@@ -898,6 +899,7 @@ export interface InstallUpdateOptions {
   zipPath: string; // 下载的更新包路径
   targetDir: string; // 目标安装目录
   newVersion: string; // 新版本号（用于兜底时创建文件夹）
+  projectName?: string; // 项目名称（用于备份配置文件）
   onProgress?: (stage: string, detail?: string) => void;
 }
 
@@ -920,9 +922,11 @@ export function isExecutableInstaller(filePath: string): boolean {
  * 7. 如果失败，尝试兜底：创建 v版本号 文件夹
  */
 export async function installUpdate(options: InstallUpdateOptions): Promise<boolean> {
-  const { zipPath, targetDir, newVersion, onProgress } = options;
+  const { zipPath, targetDir, newVersion, projectName, onProgress } = options;
 
   log.info(`开始安装更新: ${zipPath} -> ${targetDir}`);
+
+  await backupConfigBeforeUpdate(targetDir, projectName);
 
   // 对于 exe/dmg 文件，直接打开而不是解压
   if (isExecutableInstaller(zipPath)) {

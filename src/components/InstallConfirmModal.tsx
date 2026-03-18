@@ -46,6 +46,7 @@ export function InstallConfirmModal() {
   } = useAppStore();
 
   const currentVersion = projectInterface?.version || '';
+  const projectName = projectInterface?.name;
 
   // 判断是否为"刚更新完成"模式
   const isJustUpdatedMode = !!justUpdatedInfo;
@@ -63,6 +64,7 @@ export function InstallConfirmModal() {
         zipPath: downloadSavePath,
         targetDir: basePath,
         newVersion: updateInfo.versionName,
+        projectName,
         onProgress: (stage, detail) => {
           const stageText = t(`mirrorChyan.installStages.${stage}`, stage);
           if (detail) {
@@ -90,7 +92,7 @@ export function InstallConfirmModal() {
         setInstallError(error instanceof Error ? error.message : String(error));
       }
     }
-  }, [downloadSavePath, basePath, updateInfo, setInstallStatus, setInstallError, t]);
+  }, [downloadSavePath, basePath, updateInfo, projectName, setInstallStatus, setInstallError, t]);
 
   // 重启应用（直接重启，不再确认）
   const handleRestart = useCallback(async () => {
@@ -161,6 +163,7 @@ export function InstallConfirmModal() {
             zipPath: downloadSavePath,
             targetDir: basePath,
             newVersion: updateInfo.versionName,
+            projectName,
             onProgress: (stage, detail) => {
               const stageText = t(`mirrorChyan.installStages.${stage}`, stage);
               if (detail) {
@@ -202,6 +205,7 @@ export function InstallConfirmModal() {
     downloadSavePath,
     basePath,
     updateInfo,
+    projectName,
     setInstallStatus,
     setInstallError,
     t,

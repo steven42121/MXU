@@ -2,12 +2,14 @@ import type { MxuConfig } from '@/types/config';
 import { defaultConfig } from '@/types/config';
 import { loggers } from '@/utils/logger';
 import { parseJsonc } from '@/utils/jsonc';
-import { joinPath, isTauri } from '@/utils/paths';
+import { joinPath, isTauri, getCacheDir } from '@/utils/paths';
 
 const log = loggers.config;
 
 // 配置文件子目录
 const CONFIG_DIR = 'config';
+const BACKUP_SUBDIR = 'config_backup';
+const BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** 生成配置文件名 */
 function getConfigFileName(projectName?: string): string {
@@ -157,4 +159,79 @@ export function loadConfigFromStorage(projectName?: string): MxuConfig | null {
     // ignore
   }
   return null;
+}
+
+function formatTimestamp(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function parseTimestampFromFilename(filename: string): Date | null {
+  const match = filename.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.json$/);
+  if (!match) return null;
+  return new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6]),
+  );
+}
+
+/**
+ * 在更新前备份配置文件到 cache/config_backup/，同时清理超过一周的旧备份
+ */
+export async function backupConfigBeforeUpdate(
+  basePath: string,
+  projectName?: string,
+): Promise<void> {
+  if (!isTauri()) return;
+
+  const configPath = getConfigPathSync(basePath, projectName);
+
+  try {
+    const { exists, readTextFile, writeTextFile, mkdir, readDir, remove } = await import(
+      '@tauri-apps/plugin-fs'
+    );
+
+    if (!(await exists(configPath))) {
+      log.info('配置文件不存在，跳过备份');
+      return;
+    }
+
+    const cacheDir = await getCacheDir();
+    const backupDir = joinPath(cacheDir, BACKUP_SUBDIR);
+
+    if (!(await exists(backupDir))) {
+      await mkdir(backupDir, { recursive: true });
+    }
+
+    const configFileName = getConfigFileName(projectName);
+    const baseName = configFileName.replace(/\.json$/, '');
+    const timestamp = formatTimestamp(new Date());
+    const backupFileName = `${baseName}-${timestamp}.json`;
+    const backupPath = joinPath(backupDir, backupFileName);
+
+    const content = await readTextFile(configPath);
+    await writeTextFile(backupPath, content);
+    log.info(`配置文件已备份: ${backupPath}`);
+
+    // 清理超过一周的旧备份
+    const now = Date.now();
+    const entries = await readDir(backupDir);
+    for (const entry of entries) {
+      if (!entry.name || entry.isDirectory) continue;
+      const fileDate = parseTimestampFromFilename(entry.name);
+      if (fileDate && now - fileDate.getTime() > BACKUP_MAX_AGE_MS) {
+        const oldPath = joinPath(backupDir, entry.name);
+        await remove(oldPath).catch((e: unknown) => {
+          log.warn(`删除过期备份失败: ${oldPath}`, e);
+        });
+        log.info(`已删除过期备份: ${entry.name}`);
+      }
+    }
+  } catch (error) {
+    log.warn('备份配置文件失败（不影响更新流程）:', error);
+  }
 }
