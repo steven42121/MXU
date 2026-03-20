@@ -364,7 +364,7 @@ export async function checkUpdate(options: CheckUpdateOptions): Promise<UpdateIn
  * 非正式版本定义：
  * - 版本号为 "DEBUG_VERSION"
  * - 版本号小于 "1.0.0"
- * - 版本号包含 ci 或 alpha 预发布标签（如 v2.0.2-ci.123、v1.0.0-alpha.1）
+ * - 版本号包含预发布标签，且不是 beta 或 rc（如 v2.0.2-ci.123、v1.0.0-alpha.1）
  */
 export function isDebugVersion(version: string | undefined): boolean {
   if (!version) return false;
@@ -372,14 +372,18 @@ export function isDebugVersion(version: string | undefined): boolean {
 
   const normalized = version.replace(/^v/i, '');
 
-  // 优先尝试完整解析（保留预发布标签如 -ci.123、-alpha.1）
+  // 优先尝试完整解析（保留预发布标签如 -ci.123、-beta.1）
   const parsed = semver.parse(normalized);
   if (parsed) {
     if (semver.lt(parsed, '1.0.0')) return true;
-    const NON_RELEASE_TAGS = ['ci', 'alpha', 'post'];
-    return parsed.prerelease.some(
-      (tag) => typeof tag === 'string' && NON_RELEASE_TAGS.includes(tag),
-    );
+    if (parsed.prerelease.length > 0) {
+      const UPDATEABLE_TAGS = ['beta', 'rc'];
+      const isUpdateable = parsed.prerelease.some(
+        (tag) => typeof tag === 'string' && UPDATEABLE_TAGS.includes(tag),
+      );
+      return !isUpdateable;
+    }
+    return false;
   }
 
   // 回退到 coerce（处理非标准版本号，会丢失预发布标签）
