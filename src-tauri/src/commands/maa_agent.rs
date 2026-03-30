@@ -34,11 +34,10 @@ pub struct AgentOutputEvent {
 
 /// 发送 Agent 输出事件
 fn emit_agent_output(app: &tauri::AppHandle, instance_id: &str, stream: &str, line: &str) {
-    let clean_line = strip_ansi_escapes(line);
     let event = AgentOutputEvent {
         instance_id: instance_id.to_string(),
         stream: stream.to_string(),
-        line: clean_line,
+        line: strip_ansi_escapes(line),
     };
     if let Err(e) = app.emit("maa-agent-output", event) {
         log::error!("[agent_output] Failed to emit event: {}", e);
