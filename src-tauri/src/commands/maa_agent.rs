@@ -21,6 +21,7 @@ use maa_framework::tasker::Tasker;
 
 use super::types::{AgentConfig, MaaState, TaskConfig};
 use super::utils::{emit_callback_event, get_logs_dir, normalize_path};
+use crate::cprintln;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -34,10 +35,14 @@ pub struct AgentOutputEvent {
 
 /// 发送 Agent 输出事件
 fn emit_agent_output(app: &tauri::AppHandle, instance_id: &str, stream: &str, line: &str) {
+    let clean_line = strip_ansi_escapes(line);
+    let timestamp = chrono::Local::now().format("%H:%M:%S");
+    cprintln!("[{timestamp}][AGT] {clean_line}");
+
     let event = AgentOutputEvent {
         instance_id: instance_id.to_string(),
         stream: stream.to_string(),
-        line: strip_ansi_escapes(line),
+        line: clean_line,
     };
     if let Err(e) = app.emit("maa-agent-output", event) {
         log::error!("[agent_output] Failed to emit event: {}", e);

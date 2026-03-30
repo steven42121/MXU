@@ -5,6 +5,9 @@
 mod webview2;
 
 fn main() {
+    // 初始化控制台输出：仅当传入 --console 参数时附着父进程终端并启用日志输出
+    mxu_lib::commands::utils::init_console_output();
+
     #[cfg(target_os = "windows")]
     {
         // 设置 WebView2 数据目录为程序所在目录下的 webview_data 文件夹
@@ -83,5 +86,5 @@ fn main() {
         }
     }
 
-    mxu_lib::run()
+    mxu_lib::run();
 }

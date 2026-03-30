@@ -4,17 +4,169 @@
 
 use super::types::MaaCallbackEvent;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
-/// 发送回调事件到前端
+// ==================== 控制台输出 ====================
+
+static CONSOLE_ENABLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+static CONSOLE_FILE: OnceLock<std::sync::Mutex<std::fs::File>> = OnceLock::new();
+
+/// 初始化控制台输出（在 main 中调用）
+/// 仅当命令行传入 `--console` 参数时启用
+pub fn init_console_output() {
+    if !std::env::args().any(|a| a == "--console") {
+        return;
+    }
+
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+        // 附着到父进程终端（从 cmd/powershell 启动时生效）
+        if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_ok() {
+            if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+                let _ = CONSOLE_FILE.set(std::sync::Mutex::new(f));
+                CONSOLE_ENABLED.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        CONSOLE_ENABLED.store(true, Ordering::Relaxed);
+    }
+}
+
+/// 向控制台输出一行日志（仅在命令行启动时有效）
+pub fn console_println(args: std::fmt::Arguments<'_>) {
+    if !CONSOLE_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+
+    #[cfg(windows)]
+    {
+        use std::io::Write;
+        if let Some(file) = CONSOLE_FILE.get() {
+            if let Ok(mut f) = file.lock() {
+                let _ = writeln!(f, "{}", args);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        println!("{}", args);
+    }
+}
+
+/// 便捷宏：向控制台输出日志
+#[macro_export]
+macro_rules! cprintln {
+    ($($arg:tt)*) => {
+        $crate::commands::utils::console_println(format_args!($($arg)*))
+    };
+}
+
+// ==================== 回调事件 ====================
+
+/// 发送回调事件到前端，并将可读日志输出到控制台
 pub fn emit_callback_event<S: Into<String>>(app: &AppHandle, message: S, details: S) {
     let event = MaaCallbackEvent {
         message: message.into(),
         details: details.into(),
     };
+
+    if CONSOLE_ENABLED.load(Ordering::Relaxed) {
+        print_callback_log(&event.message, &event.details);
+    }
+
     if let Err(e) = app.emit("maa-callback", event) {
         log::error!("Failed to emit maa-callback: {}", e);
     }
+}
+
+/// 将 MaaFramework 回调转换为可读日志并输出到控制台
+fn print_callback_log(message: &str, details_json: &str) {
+    let details: serde_json::Value = serde_json::from_str(details_json).unwrap_or_default();
+    let timestamp = chrono::Local::now().format("%H:%M:%S");
+
+    let (level, text) = match message {
+        // ===== 控制器连接 =====
+        "Controller.Action.Starting" => {
+            let action = details["action"].as_str().unwrap_or("");
+            if !action.eq_ignore_ascii_case("connect") {
+                return;
+            }
+            ("INF", "Connecting...".to_string())
+        }
+        "Controller.Action.Succeeded" => {
+            let action = details["action"].as_str().unwrap_or("");
+            if !action.eq_ignore_ascii_case("connect") {
+                return;
+            }
+            ("SUC", "Connected".to_string())
+        }
+        "Controller.Action.Failed" => {
+            let action = details["action"].as_str().unwrap_or("");
+            if !action.eq_ignore_ascii_case("connect") {
+                return;
+            }
+            ("ERR", "Connection failed".to_string())
+        }
+
+        // ===== 资源加载 =====
+        "Resource.Loading.Starting" => {
+            let path = details["path"].as_str().unwrap_or("");
+            ("INF", format!("Loading resource: {path}"))
+        }
+        "Resource.Loading.Succeeded" => {
+            let path = details["path"].as_str().unwrap_or("");
+            ("SUC", format!("Resource loaded: {path}"))
+        }
+        "Resource.Loading.Failed" => {
+            let path = details["path"].as_str().unwrap_or("");
+            ("ERR", format!("Resource load failed: {path}"))
+        }
+
+        // ===== 任务执行 =====
+        "Tasker.Task.Starting" => {
+            let entry = details["entry"].as_str().unwrap_or("unknown");
+            ("INF", format!("Task started: {entry}"))
+        }
+        "Tasker.Task.Succeeded" => {
+            let entry = details["entry"].as_str().unwrap_or("unknown");
+            ("SUC", format!("Task completed: {entry}"))
+        }
+        "Tasker.Task.Failed" => {
+            let entry = details["entry"].as_str().unwrap_or("unknown");
+            ("ERR", format!("Task failed: {entry}"))
+        }
+
+        // ===== 节点级消息（含 focus 时输出） =====
+        msg if msg.starts_with("Node.") => {
+            if let Some(focus) = details.get("focus") {
+                if let Some(tmpl) = focus.get(message).and_then(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .or_else(|| v.get("content").and_then(|c| c.as_str()).map(String::from))
+                }) {
+                    ("FCS", tmpl)
+                } else {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+
+        _ => return,
+    };
+
+    cprintln!("[{timestamp}][{level}] {text}");
 }
 
 /// 获取应用数据目录
