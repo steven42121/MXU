@@ -24,13 +24,35 @@ pub fn init_console_output() {
 
     #[cfg(windows)]
     {
-        use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Console::{
+            AttachConsole, SetConsoleOutputCP, SetStdHandle, ATTACH_PARENT_PROCESS,
+            STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        };
 
         // 附着到父进程终端（从 cmd/powershell 启动时生效）
         if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_ok() {
+            // 设置控制台输出为 UTF-8
+            unsafe {
+                let _ = SetConsoleOutputCP(65001);
+            }
+
             if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
                 let _ = CONSOLE_FILE.set(std::sync::Mutex::new(f));
                 CONSOLE_ENABLED.store(true, Ordering::Relaxed);
+
+                // 将进程的 stdout/stderr 重定向到 NUL
+                // 防止 MaaFramework C++ 库的内部日志直接输出到终端
+                if let Ok(nul) = std::fs::OpenOptions::new().write(true).open("NUL") {
+                    let nul_handle =
+                        HANDLE(nul.as_raw_handle() as *mut std::ffi::c_void);
+                    unsafe {
+                        let _ = SetStdHandle(STD_OUTPUT_HANDLE, nul_handle);
+                        let _ = SetStdHandle(STD_ERROR_HANDLE, nul_handle);
+                    }
+                    std::mem::forget(nul); // 保持 NUL 句柄存活
+                }
             }
         }
     }
@@ -71,102 +93,22 @@ macro_rules! cprintln {
     };
 }
 
+/// 返回控制台输出是否已启用
+pub fn is_console_enabled() -> bool {
+    CONSOLE_ENABLED.load(Ordering::Relaxed)
+}
+
 // ==================== 回调事件 ====================
 
-/// 发送回调事件到前端，并将可读日志输出到控制台
+/// 发送回调事件到前端
 pub fn emit_callback_event<S: Into<String>>(app: &AppHandle, message: S, details: S) {
     let event = MaaCallbackEvent {
         message: message.into(),
         details: details.into(),
     };
-
-    if CONSOLE_ENABLED.load(Ordering::Relaxed) {
-        print_callback_log(&event.message, &event.details);
-    }
-
     if let Err(e) = app.emit("maa-callback", event) {
         log::error!("Failed to emit maa-callback: {}", e);
     }
-}
-
-/// 将 MaaFramework 回调转换为可读日志并输出到控制台
-fn print_callback_log(message: &str, details_json: &str) {
-    let details: serde_json::Value = serde_json::from_str(details_json).unwrap_or_default();
-    let timestamp = chrono::Local::now().format("%H:%M:%S");
-
-    let (level, text) = match message {
-        // ===== 控制器连接 =====
-        "Controller.Action.Starting" => {
-            let action = details["action"].as_str().unwrap_or("");
-            if !action.eq_ignore_ascii_case("connect") {
-                return;
-            }
-            ("INF", "Connecting...".to_string())
-        }
-        "Controller.Action.Succeeded" => {
-            let action = details["action"].as_str().unwrap_or("");
-            if !action.eq_ignore_ascii_case("connect") {
-                return;
-            }
-            ("SUC", "Connected".to_string())
-        }
-        "Controller.Action.Failed" => {
-            let action = details["action"].as_str().unwrap_or("");
-            if !action.eq_ignore_ascii_case("connect") {
-                return;
-            }
-            ("ERR", "Connection failed".to_string())
-        }
-
-        // ===== 资源加载 =====
-        "Resource.Loading.Starting" => {
-            let path = details["path"].as_str().unwrap_or("");
-            ("INF", format!("Loading resource: {path}"))
-        }
-        "Resource.Loading.Succeeded" => {
-            let path = details["path"].as_str().unwrap_or("");
-            ("SUC", format!("Resource loaded: {path}"))
-        }
-        "Resource.Loading.Failed" => {
-            let path = details["path"].as_str().unwrap_or("");
-            ("ERR", format!("Resource load failed: {path}"))
-        }
-
-        // ===== 任务执行 =====
-        "Tasker.Task.Starting" => {
-            let entry = details["entry"].as_str().unwrap_or("unknown");
-            ("INF", format!("Task started: {entry}"))
-        }
-        "Tasker.Task.Succeeded" => {
-            let entry = details["entry"].as_str().unwrap_or("unknown");
-            ("SUC", format!("Task completed: {entry}"))
-        }
-        "Tasker.Task.Failed" => {
-            let entry = details["entry"].as_str().unwrap_or("unknown");
-            ("ERR", format!("Task failed: {entry}"))
-        }
-
-        // ===== 节点级消息（含 focus 时输出） =====
-        msg if msg.starts_with("Node.") => {
-            if let Some(focus) = details.get("focus") {
-                if let Some(tmpl) = focus.get(message).and_then(|v| {
-                    v.as_str()
-                        .map(String::from)
-                        .or_else(|| v.get("content").and_then(|c| c.as_str()).map(String::from))
-                }) {
-                    ("FCS", tmpl)
-                } else {
-                    return;
-                }
-            } else {
-                return;
-            }
-        }
-
-        _ => return,
-    };
-
-    cprintln!("[{timestamp}][{level}] {text}");
 }
 
 /// 获取应用数据目录

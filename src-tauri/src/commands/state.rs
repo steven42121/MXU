@@ -2,6 +2,7 @@
 //!
 //! 提供实例状态和缓存数据查询功能
 
+use crate::cprintln;
 use log::debug;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -104,4 +105,17 @@ pub fn maa_get_cached_win32_windows(
         .lock()
         .map_err(|e| e.to_string())?;
     Ok(cached.clone())
+}
+
+/// 查询 --console 是否已启用
+#[tauri::command]
+pub fn is_console_enabled() -> bool {
+    super::utils::is_console_enabled()
+}
+
+/// 由前端调用，将已格式化的日志行输出到控制台
+#[tauri::command]
+pub fn console_log(message: String) {
+    let timestamp = chrono::Local::now().format("%H:%M:%S");
+    cprintln!("[{timestamp}] {message}");
 }

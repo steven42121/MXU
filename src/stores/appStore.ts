@@ -37,6 +37,37 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { generateId, initializeAllOptionValues, convertPresetOptionValue } from './helpers';
 // 从独立模块导入类型和辅助函数
 import type { AppState, LogEntry, TaskRunStatus } from './types';
+import { isTauri } from '@/utils/paths';
+
+// --console 模式：缓存 invoke 函数和启用状态
+let _consoleEnabled: boolean | null = null;
+let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
+
+async function getConsoleInvoke() {
+  if (_consoleEnabled === false) return null;
+  if (_invoke && _consoleEnabled === true) return _invoke;
+  if (!isTauri()) {
+    _consoleEnabled = false;
+    return null;
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  _invoke = invoke;
+  try {
+    _consoleEnabled = await invoke<boolean>('is_console_enabled');
+  } catch {
+    _consoleEnabled = false;
+  }
+  return _consoleEnabled ? _invoke : null;
+}
+
+function forwardLogToConsole(message: string) {
+  // 剥离所有 HTML 标签（含 <br/>、<span> 等），保留纯文本
+  const plain = message.replace(/<[^>]*>/g, '').trim();
+  if (!plain) return;
+  getConsoleInvoke().then((inv) => {
+    if (inv) inv('console_log', { message: plain }).catch(() => {});
+  });
+}
 
 // 重新导出类型供外部使用
 export type {
@@ -1686,6 +1717,9 @@ export const useAppStore = create<AppState>()(
           timestamp: new Date(),
           ...log,
         };
+
+        // --console 模式：将日志转发到终端
+        forwardLogToConsole(log.message);
         // 限制每个实例最多保留 N 条日志（超出丢弃最旧的）。
         // 这里也做归一化，避免配置错误导致无限增长；与 UI
         // 限制保持一致：[100, 10000]，默认 2000。
