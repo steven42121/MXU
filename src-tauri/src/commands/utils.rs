@@ -12,8 +12,9 @@ use tauri::{AppHandle, Emitter};
 
 static CONSOLE_ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// 存储 CONOUT$ 句柄的原始指针值（线程安全：WriteConsoleW 本身是线程安全的）
 #[cfg(windows)]
-static CONSOLE_FILE: OnceLock<std::sync::Mutex<std::fs::File>> = OnceLock::new();
+static CONSOLE_HANDLE: OnceLock<usize> = OnceLock::new();
 
 /// 初始化控制台输出（在 main 中调用）
 /// 仅当命令行传入 `--console` 参数时启用
@@ -27,26 +28,23 @@ pub fn init_console_output() {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::System::Console::{
-            AttachConsole, SetConsoleOutputCP, SetStdHandle, ATTACH_PARENT_PROCESS,
-            STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+            AttachConsole, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
+            STD_OUTPUT_HANDLE,
         };
 
         // 附着到父进程终端（从 cmd/powershell 启动时生效）
         if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_ok() {
-            // 设置控制台输出为 UTF-8
-            unsafe {
-                let _ = SetConsoleOutputCP(65001);
-            }
-
+            // 打开 CONOUT$ 获取控制台输出句柄（不受后续 stdout 重定向影响）
             if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
-                let _ = CONSOLE_FILE.set(std::sync::Mutex::new(f));
+                let raw = f.as_raw_handle() as usize;
+                let _ = CONSOLE_HANDLE.set(raw);
+                std::mem::forget(f); // 保持句柄存活
                 CONSOLE_ENABLED.store(true, Ordering::Relaxed);
 
                 // 将进程的 stdout/stderr 重定向到 NUL
                 // 防止 MaaFramework C++ 库的内部日志直接输出到终端
                 if let Ok(nul) = std::fs::OpenOptions::new().write(true).open("NUL") {
-                    let nul_handle =
-                        HANDLE(nul.as_raw_handle() as *mut std::ffi::c_void);
+                    let nul_handle = HANDLE(nul.as_raw_handle() as *mut std::ffi::c_void);
                     unsafe {
                         let _ = SetStdHandle(STD_OUTPUT_HANDLE, nul_handle);
                         let _ = SetStdHandle(STD_ERROR_HANDLE, nul_handle);
@@ -64,6 +62,7 @@ pub fn init_console_output() {
 }
 
 /// 向控制台输出一行日志（仅在命令行启动时有效）
+/// Windows: 使用 WriteConsoleW 直接写 UTF-16，不依赖 codepage 设置
 pub fn console_println(args: std::fmt::Arguments<'_>) {
     if !CONSOLE_ENABLED.load(Ordering::Relaxed) {
         return;
@@ -71,10 +70,16 @@ pub fn console_println(args: std::fmt::Arguments<'_>) {
 
     #[cfg(windows)]
     {
-        use std::io::Write;
-        if let Some(file) = CONSOLE_FILE.get() {
-            if let Ok(mut f) = file.lock() {
-                let _ = writeln!(f, "{}", args);
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Console::WriteConsoleW;
+
+        if let Some(&raw) = CONSOLE_HANDLE.get() {
+            let handle = HANDLE(raw as *mut std::ffi::c_void);
+            let text = format!("{}\r\n", args);
+            let wide: Vec<u16> = text.encode_utf16().collect();
+            let mut written = 0u32;
+            unsafe {
+                let _ = WriteConsoleW(handle, &wide, Some(&mut written), None);
             }
         }
     }
