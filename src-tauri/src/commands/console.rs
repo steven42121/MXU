@@ -124,11 +124,24 @@ pub fn init_console_output() {
 
         // 3. ui 模式：CRT fd 1/2 → NUL（丢弃 C++ 库噪音）
         //    _dup2 会自动调用 SetStdHandle 覆盖 Win32 句柄，
-        //    所以先保存 → _dup2 → 恢复，确保 println! 仍输出到终端
+        //    所以先保存 → _dup2 → 恢复，确保 println! 仍输出到终端/管道
+        //
+        //    注意：_dup2 关闭旧 fd 时会 CloseHandle 其底层 OS 句柄。
+        //    如果 CRT 启动代码已将管道句柄映射到 fd 1/2，_dup2 会关掉管道句柄，
+        //    导致 saved 的句柄值失效。因此必须用 DuplicateHandle 复制一份。
         if log_mode == LogPrintMode::Ui {
-            // 保存当前 Win32 stdout/stderr 句柄
-            let saved_out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }.unwrap_or(HANDLE::default());
-            let saved_err = unsafe { GetStdHandle(STD_ERROR_HANDLE) }.unwrap_or(HANDLE::default());
+            use windows::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS};
+            use windows::Win32::System::Threading::GetCurrentProcess;
+
+            let cur = unsafe { GetCurrentProcess() };
+            let raw_out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }.unwrap_or(HANDLE::default());
+            let raw_err = unsafe { GetStdHandle(STD_ERROR_HANDLE) }.unwrap_or(HANDLE::default());
+
+            // 复制句柄，防止 _dup2 关闭原始句柄后失效
+            let mut dup_out = HANDLE::default();
+            let mut dup_err = HANDLE::default();
+            let _ = unsafe { DuplicateHandle(cur, raw_out, cur, &mut dup_out, 0, false, DUPLICATE_SAME_ACCESS) };
+            let _ = unsafe { DuplicateHandle(cur, raw_err, cur, &mut dup_err, 0, false, DUPLICATE_SAME_ACCESS) };
 
             if let Ok(nul) = std::fs::OpenOptions::new().write(true).open("NUL") {
                 unsafe {
@@ -142,9 +155,9 @@ pub fn init_console_output() {
                         let _ = _dup2(nul_fd, 2); // CRT stderr → NUL（同时覆盖 Win32 句柄）
                     }
 
-                    // 恢复 Win32 句柄，让 println! 继续输出到终端/管道
-                    let _ = SetStdHandle(STD_OUTPUT_HANDLE, saved_out);
-                    let _ = SetStdHandle(STD_ERROR_HANDLE, saved_err);
+                    // 用复制的句柄恢复 Win32 stdout/stderr
+                    let _ = SetStdHandle(STD_OUTPUT_HANDLE, dup_out);
+                    let _ = SetStdHandle(STD_ERROR_HANDLE, dup_err);
                 }
                 std::mem::forget(nul);
             }
