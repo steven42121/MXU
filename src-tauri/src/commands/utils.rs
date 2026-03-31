@@ -138,6 +138,22 @@ pub fn init_console_output() {
             }
         }
     }
+
+    // macOS/Linux: ui 模式重定向 fd 1/2 到 /dev/null
+    #[cfg(not(windows))]
+    {
+        if log_mode == LogPrintMode::Ui {
+            if let Ok(nul) = std::fs::OpenOptions::new().write(true).open("/dev/null") {
+                use std::os::unix::io::AsRawFd;
+                let nul_fd = nul.as_raw_fd();
+                unsafe {
+                    let _ = libc::dup2(nul_fd, 1); // stdout → /dev/null
+                    let _ = libc::dup2(nul_fd, 2); // stderr → /dev/null
+                }
+                std::mem::forget(nul);
+            }
+        }
+    }
 }
 
 /// 向终端输出一行日志（WriteConsoleW 直写 UTF-16，不依赖 codepage）
