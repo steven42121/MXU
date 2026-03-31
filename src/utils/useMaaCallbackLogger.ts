@@ -32,7 +32,7 @@ const PENDING_TASK_CONSOLE_REPLAY_DELAY_MS = 200;
 const PENDING_TASK_CONSOLE_MAX_RETRIES = 300;
 type ConsoleOutputMode = 'off' | 'ui' | 'verbose';
 
-// --console 模式：本文件内直接回放控制台日志（不重复写入 UI）
+// --log-mode 模式：本文件内直接回放控制台日志（不重复写入 UI）
 let _consoleEnabled: boolean | null = null;
 let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 let _consoleOutputMode: ConsoleOutputMode | null = null;

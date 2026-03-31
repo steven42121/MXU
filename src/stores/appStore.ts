@@ -38,7 +38,7 @@ import { generateId, initializeAllOptionValues, convertPresetOptionValue } from 
 import type { AppState, LogEntry, TaskRunStatus } from './types';
 import { isTauri } from '@/utils/paths';
 
-// --console 模式：缓存 invoke 函数和启用状态
+// --log-mode 模式：缓存 invoke 函数和启用状态
 let _consoleEnabled: boolean | null = null;
 let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
@@ -1718,7 +1718,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...uiLog,
       };
 
-      // --console 模式：将日志转发到终端
+      // --log-mode 模式：将日志转发到终端
       // consoleMessage 为 null 时表示显式抑制本条终端输出（用于延迟回放场景）
       if (consoleMessage !== null) {
         forwardLogToConsole(consoleMessage ?? uiLog.message);
