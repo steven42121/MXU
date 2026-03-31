@@ -39,15 +39,26 @@ fn default_log_print_mode() -> LogPrintMode {
     }
 }
 
+fn parse_mode_value(mode: &str) -> LogPrintMode {
+    match mode.to_ascii_lowercase().as_str() {
+        "none" | "off" | "silent" => LogPrintMode::None,
+        "raw" => LogPrintMode::Raw,
+        "ui" => LogPrintMode::Ui,
+        "verbose" => LogPrintMode::Verbose,
+        _ => default_log_print_mode(),
+    }
+}
+
 fn parse_log_print_mode(args: &[String]) -> LogPrintMode {
+    // --log-mode=value
     if let Some(mode) = args.iter().find_map(|a| a.strip_prefix("--log-mode=")) {
-        return match mode.to_ascii_lowercase().as_str() {
-            "none" | "off" | "silent" => LogPrintMode::None,
-            "raw" => LogPrintMode::Raw,
-            "ui" => LogPrintMode::Ui,
-            "verbose" => LogPrintMode::Verbose,
-            _ => default_log_print_mode(),
-        };
+        return parse_mode_value(mode);
+    }
+    // --log-mode value
+    if let Some(pos) = args.iter().position(|a| a == "--log-mode") {
+        if let Some(mode) = args.get(pos + 1) {
+            return parse_mode_value(mode);
+        }
     }
 
     default_log_print_mode()
@@ -152,7 +163,7 @@ pub fn init_console_output() {
     }
 }
 
-/// 向终端输出一行日志（println! 走 Win32 GetStdHandle，可被管道捕获）
+/// 向终端输出一行日志（println! 可被管道捕获）
 pub fn console_println(args: std::fmt::Arguments<'_>) {
     if !is_console_enabled() {
         return;
