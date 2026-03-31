@@ -27,27 +27,6 @@ pub enum ConsoleMode {
 
 static CONSOLE_MODE: OnceLock<ConsoleMode> = OnceLock::new();
 
-/// 存储 CONOUT$ 句柄（线程安全：WriteConsoleW 本身是线程安全的）
-#[cfg(windows)]
-static CONSOLE_HANDLE: OnceLock<usize> = OnceLock::new();
-
-/// 通过 CONOUT$ 句柄向控制台写一行 UTF-16 文本（不依赖 codepage）
-#[cfg(windows)]
-fn write_to_console(text: &str) {
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Console::WriteConsoleW;
-
-    if let Some(&raw) = CONSOLE_HANDLE.get() {
-        let handle = HANDLE(raw as *mut std::ffi::c_void);
-        let line = format!("{}\r\n", text);
-        let wide: Vec<u16> = line.encode_utf16().collect();
-        let mut written = 0u32;
-        unsafe {
-            let _ = WriteConsoleW(handle, &wide, Some(&mut written), None);
-        }
-    }
-}
-
 fn default_log_print_mode() -> LogPrintMode {
     #[cfg(debug_assertions)]
     {
@@ -78,8 +57,8 @@ fn parse_log_print_mode(args: &[String]) -> LogPrintMode {
 /// 支持 `--log-mode=<none|raw|ui|verbose>`
 /// - none: 不输出日志到控制台
 /// - raw: 保留标准流原始日志输出（tauri_plugin_log Stdout target）
-/// - ui: 附着父终端，CRT fd → NUL 丢弃 C++ 噪音，WriteConsoleW 输出格式化日志
-/// - verbose: 附着父终端，C++ 原始日志保留，WriteConsoleW 输出格式化日志
+/// - ui: 附着父终端，CRT fd → NUL 丢弃 C++ 噪音，println! 输出格式化日志
+/// - verbose: 附着父终端，C++ 原始日志保留，println! 输出格式化日志
 pub fn init_console_output() {
     let args: Vec<String> = std::env::args().collect();
     let log_mode = parse_log_print_mode(&args);
@@ -100,7 +79,11 @@ pub fn init_console_output() {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
-        use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Console::{
+            AttachConsole, GetStdHandle, SetConsoleOutputCP, SetStdHandle,
+            ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        };
 
         // 1. 附着父终端（从 cmd/powershell 启动时生效）
         if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_err() {
@@ -108,20 +91,29 @@ pub fn init_console_output() {
             return;
         }
 
-        // 2. 打开 CONOUT$ 获取控制台直写句柄（WriteConsoleW 输出用）
-        let conout = match std::fs::OpenOptions::new().write(true).open("CONOUT$") {
-            Ok(f) => f,
-            Err(_) => {
-                log::warn!("无法打开 CONOUT$");
-                return;
-            }
-        };
-        let _ = CONSOLE_HANDLE.set(conout.as_raw_handle() as usize);
-        std::mem::forget(conout); // 保持句柄存活
+        // 设置控制台输出代码页为 UTF-8
+        unsafe { let _ = SetConsoleOutputCP(65001); }
 
-        // 3. ui 模式：把 CRT fd 1/2 重定向到 NUL，丢弃 C++ 库噪音
-        //    verbose 模式：不动 CRT fd，C++ 库日志自然输出到终端
+        // 2. 打开 CONOUT$ 设置 Win32 stdout/stderr 句柄
+        //    windows_subsystem="windows" 的 GUI 程序启动时 GetStdHandle 返回 NULL，
+        //    AttachConsole 不会自动设置，需要手动指向 CONOUT$
+        if let Ok(conout) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+            let conout_handle = HANDLE(conout.as_raw_handle() as *mut std::ffi::c_void);
+            unsafe {
+                let _ = SetStdHandle(STD_OUTPUT_HANDLE, conout_handle);
+                let _ = SetStdHandle(STD_ERROR_HANDLE, conout_handle);
+            }
+            std::mem::forget(conout);
+        }
+
+        // 3. ui 模式：CRT fd 1/2 → NUL（丢弃 C++ 库噪音）
+        //    _dup2 会自动调用 SetStdHandle 覆盖 Win32 句柄，
+        //    所以先保存 → _dup2 → 恢复，确保 println! 仍输出到终端
         if log_mode == LogPrintMode::Ui {
+            // 保存当前 Win32 stdout/stderr 句柄
+            let saved_out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }.unwrap_or(HANDLE::default());
+            let saved_err = unsafe { GetStdHandle(STD_ERROR_HANDLE) }.unwrap_or(HANDLE::default());
+
             if let Ok(nul) = std::fs::OpenOptions::new().write(true).open("NUL") {
                 unsafe {
                     extern "C" {
@@ -130,9 +122,13 @@ pub fn init_console_output() {
                     }
                     let nul_fd = _open_osfhandle(nul.as_raw_handle() as isize, 0);
                     if nul_fd >= 0 {
-                        let _ = _dup2(nul_fd, 1); // CRT stdout → NUL
-                        let _ = _dup2(nul_fd, 2); // CRT stderr → NUL
+                        let _ = _dup2(nul_fd, 1); // CRT stdout → NUL（同时覆盖 Win32 句柄）
+                        let _ = _dup2(nul_fd, 2); // CRT stderr → NUL（同时覆盖 Win32 句柄）
                     }
+
+                    // 恢复 Win32 句柄，让 println! 继续输出到终端/管道
+                    let _ = SetStdHandle(STD_OUTPUT_HANDLE, saved_out);
+                    let _ = SetStdHandle(STD_ERROR_HANDLE, saved_err);
                 }
                 std::mem::forget(nul);
             }
@@ -156,21 +152,12 @@ pub fn init_console_output() {
     }
 }
 
-/// 向终端输出一行日志（WriteConsoleW 直写 UTF-16，不依赖 codepage）
+/// 向终端输出一行日志（println! 走 Win32 GetStdHandle，可被管道捕获）
 pub fn console_println(args: std::fmt::Arguments<'_>) {
     if !is_console_enabled() {
         return;
     }
-
-    #[cfg(windows)]
-    {
-        write_to_console(&format!("{}", args));
-    }
-
-    #[cfg(not(windows))]
-    {
-        println!("{}", args);
-    }
+    println!("{}", args);
 }
 
 /// 便捷宏：向控制台输出日志
