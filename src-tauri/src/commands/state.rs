@@ -129,5 +129,7 @@ pub fn console_log(message: String) {
         return;
     }
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S.%3f");
-    cprintln!("[{timestamp}] {message}");
+    for line in message.lines() {
+        cprintln!("[{timestamp}] {line}");
+    }
 }
