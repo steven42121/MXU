@@ -152,22 +152,6 @@ pub fn maa_init(state: State<Arc<MaaState>>, lib_dir: Option<String>) -> Result<
         Err(e) => return Err(e),
     }
 
-    // --log-stdout 模式下在 MaaFramework 初始化阶段关闭其 stdout 日志，
-    // 避免与前端转发的结构化控制台日志重复。
-    if super::console::is_log_stdout() {
-        if let Err(e) = maa_framework::set_stdout_level(
-            maa_framework::sys::MaaLoggingLevelEnum_MaaLoggingLevel_Off
-                as maa_framework::sys::MaaLoggingLevel,
-        ) {
-            warn!(
-                "Failed to disable MaaFramework stdout logging: {}",
-                e
-            );
-        } else {
-            info!("MaaFramework stdout logging disabled for console output mode");
-        }
-    }
-
     // 初始化 Toolkit
     // 初始化 Toolkit 配置，user_path 指向应用数据目录
     let data_dir = crate::commands::utils::get_app_data_dir()
@@ -178,6 +162,18 @@ pub fn maa_init(state: State<Arc<MaaState>>, lib_dir: Option<String>) -> Result<
 
     if let Err(e) = Toolkit::init_option(&user_path_str, "{}") {
         warn!("Failed to init toolkit option: {}", e);
+    }
+
+    // 关闭 MaaFramework C++ 端的 stdout 日志输出（仅 --log-stdout 模式）。
+    // 必须在 Toolkit::init_option 之后调用，因为 init_option 内部的
+    // apply_option() 会根据配置文件重设 stdout_level（默认 error）。
+    if super::console::is_log_stdout() {
+        if let Err(e) = maa_framework::set_stdout_level(
+            maa_framework::sys::MaaLoggingLevelEnum_MaaLoggingLevel_Off
+                as maa_framework::sys::MaaLoggingLevel,
+        ) {
+            warn!("Failed to disable MaaFramework stdout logging: {}", e);
+        }
     }
 
     let version = maa_framework::maa_version().to_string();
