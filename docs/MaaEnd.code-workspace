@@ -1,0 +1,16 @@
+{
+  "folders": [
+	{
+		"path": "../../MaaEnd"
+	},
+	{
+		"path": ".."
+	}
+],
+  "settings": {
+    "files.associations": {
+      "**/assets/**/*.json": "jsonc",
+      "**/tests/**/*.json": "jsonc"
+    }
+  }
+}
