@@ -16,6 +16,8 @@ export interface ProjectInterface {
   welcome?: string;
   description?: string;
   agent?: AgentConfig | AgentConfig[];
+  /** custom.json 路径（相对于 interface.json 所在目录） */
+  custom?: string;
   controller: ControllerItem[];
   resource: ResourceItem[];
   /** v2.4.0: 任务分组声明 */

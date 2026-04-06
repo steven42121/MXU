@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   ProjectInterface,
+  AgentConfig,
   TaskItem,
   OptionDefinition,
   ControllerType,
@@ -58,6 +59,13 @@ async function getDataDir(): Promise<string> {
  */
 async function readLocalFile(filename: string): Promise<string> {
   return await invoke<string>('read_local_file', { filename });
+}
+
+/**
+ * 检查本地文件是否存在（相对于 exe 目录）
+ */
+async function localFileExistsLocal(filename: string): Promise<boolean> {
+  return await invoke<boolean>('local_file_exists', { filename });
 }
 
 /**
@@ -350,6 +358,72 @@ function getDirectoryFromPath(filePath: string): string {
   return filePath.substring(0, lastSlash);
 }
 
+function normalizeToPosix(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function pickEmbeddedAgent(agent: ProjectInterface['agent']): AgentConfig | undefined {
+  if (!agent) return undefined;
+  if (Array.isArray(agent)) {
+    return agent.find((a) => Boolean(a?.embedded));
+  }
+  return agent.embedded ? agent : undefined;
+}
+
+/**
+ * 从 embedded agent 的 child_args 推导 custom.json 相对路径
+ * 例：{PROJECT_DIR}/MSBAcustom/main.py -> MSBAcustom/custom.json
+ */
+function deriveEmbeddedCustomPath(agent: AgentConfig): string | undefined {
+  const args = agent.child_args ?? [];
+  const entryArg = args.find((arg) => /\.py$/i.test(arg.trim()));
+  if (!entryArg) return undefined;
+
+  let normalized = normalizeToPosix(entryArg.trim());
+  normalized = normalized.replace('{PROJECT_DIR}/', '').replace('{PROJECT_DIR}', '');
+  normalized = normalized.replace(/^\.\//, '').replace(/^\//, '');
+  if (!/\.py$/i.test(normalized)) return undefined;
+
+  const slash = normalized.lastIndexOf('/');
+  if (slash <= 0) return 'custom.json';
+  const dir = normalized.slice(0, slash);
+  return `${dir}/custom.json`;
+}
+
+/**
+ * Qt6 兼容：当 agent.embedded=true 时，自动推导并注入 custom 路径。
+ * 注意：MXU 仍保留 agent 运行链路，此处仅补齐 PI 字段兼容，方便风味包迁移。
+ */
+async function applyEmbeddedAgentCustomization(
+  pi: ProjectInterface,
+  useLocal: boolean,
+): Promise<void> {
+  const embeddedAgent = pickEmbeddedAgent(pi.agent);
+  if (!embeddedAgent) return;
+
+  const customPath = deriveEmbeddedCustomPath(embeddedAgent);
+  if (!customPath) {
+    log.warn('检测到 embedded agent，但无法从 child_args 推导 custom.json 路径');
+    return;
+  }
+
+  if (useLocal) {
+    try {
+      const exists = await localFileExistsLocal(customPath);
+      if (!exists) {
+        log.warn(`embedded custom 推导路径不存在: ${customPath}`);
+        return;
+      }
+    } catch (err) {
+      log.warn('检查 embedded custom 路径失败:', err);
+      return;
+    }
+  }
+
+  pi.custom = customPath;
+  log.info(`embedded agent 兼容：已注入 custom 路径 -> ${customPath}`);
+}
+
 /**
  * 加载 interface.json
  *
@@ -381,6 +455,9 @@ export async function autoLoadInterface(): Promise<LoadResult> {
     // 处理 import 字段
     await processImports(pi, relativeBasePath, true);
 
+    // Qt6 embedded 兼容：自动推导 custom 字段
+    await applyEmbeddedAgentCustomization(pi, true);
+
     // 过滤掉当前平台不支持的控制器
     filterControllersByPlatform(pi);
 
@@ -396,6 +473,9 @@ export async function autoLoadInterface(): Promise<LoadResult> {
     // 处理 import 字段
     const httpBasePath = relativeBasePath ? `/${relativeBasePath}` : '';
     await processImports(pi, httpBasePath, false);
+
+    // 浏览器环境同样做 embedded->custom 推导（不做本地存在性校验）
+    await applyEmbeddedAgentCustomization(pi, false);
 
     // 过滤掉当前平台不支持的控制器
     filterControllersByPlatform(pi);
