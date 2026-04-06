@@ -762,7 +762,7 @@ export function Toolbar({ showAddPanel, onToggleAddPanel }: ToolbarProps) {
         }
 
         // 准备 Agent 配置（支持单个或多个 Agent）
-        const agentConfigs = normalizeAgentConfigs(projectInterface?.agent);
+        const agentConfigs = normalizeAgentConfigs(projectInterface?.agent, basePath);
 
         // PI v2.5.0: 构建 Agent 子进程环境变量
         const piEnvs = agentConfigs?.length
@@ -844,7 +844,7 @@ export function Toolbar({ showAddPanel, onToggleAddPanel }: ToolbarProps) {
           message: `${t('taskList.autoConnect.startFailed')}: ${errMsg}`,
         });
 
-        const failedAgentConfigs = normalizeAgentConfigs(projectInterface?.agent);
+        const failedAgentConfigs = normalizeAgentConfigs(projectInterface?.agent, basePath);
         if (failedAgentConfigs && failedAgentConfigs.length > 0) {
           for (let i = 0; i < failedAgentConfigs.length; i++) {
             const agentCfg = failedAgentConfigs[i];
@@ -1022,7 +1022,7 @@ export function Toolbar({ showAddPanel, onToggleAddPanel }: ToolbarProps) {
         log.warn('等待任务停止超时，保留运行状态以避免 UI 与实际不一致');
         return;
       }
-      const agentConfigs = normalizeAgentConfigs(projectInterface?.agent);
+      const agentConfigs = normalizeAgentConfigs(projectInterface?.agent, basePath);
       if (agentConfigs && agentConfigs.length > 0) {
         // 任务已停止后再断开 agent，避免释放顺序问题
         await maaService.stopAgent(targetInstanceId);

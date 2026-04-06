@@ -42,6 +42,11 @@ export interface GroupItem {
 export interface AgentConfig {
   child_exec: string;
   child_args?: string[];
+  /**
+   * PI 兼容字段：当为 true 时，允许省略 child_exec（默认回退为 python）。
+   * 说明：MXU 当前仍以 Agent 子进程模式运行，此字段用于兼容配置写法。
+   */
+  embedded?: boolean;
   identifier?: string;
   /** 连接超时时间（毫秒），-1 表示无限等待 */
   timeout?: number;
@@ -53,9 +58,35 @@ export interface AgentConfig {
  */
 export function normalizeAgentConfigs(
   agent: AgentConfig | AgentConfig[] | undefined,
+  projectDir?: string,
 ): AgentConfig[] | undefined {
   if (!agent) return undefined;
-  return Array.isArray(agent) ? agent : [agent];
+
+  const source = Array.isArray(agent) ? agent : [agent];
+  const normalized: AgentConfig[] = [];
+
+  for (const cfg of source) {
+    const childExecRaw = String(cfg.child_exec ?? '').trim();
+    // 兼容 embedded 写法：允许省略 child_exec，默认使用 python
+    let childExec = childExecRaw || (cfg.embedded ? 'python' : '');
+    if (!childExec) continue;
+
+    if (projectDir) {
+      childExec = childExec.split('{PROJECT_DIR}').join(projectDir);
+    }
+
+    const childArgs = (cfg.child_args ?? []).map((arg) =>
+      projectDir ? arg.split('{PROJECT_DIR}').join(projectDir) : arg,
+    );
+
+    normalized.push({
+      ...cfg,
+      child_exec: childExec,
+      child_args: childArgs.length > 0 ? childArgs : undefined,
+    });
+  }
+
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 export type ControllerType = 'Adb' | 'Win32' | 'PlayCover' | 'Gamepad';

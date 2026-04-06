@@ -203,7 +203,7 @@ function InstanceCard({ instanceId, instanceName, isActive, onSelect }: Instance
           setIsStopping(true);
           cancelTaskQueueMonitor(instanceId);
           await maaService.stopTask(instanceId);
-          const agentConfigs = normalizeAgentConfigs(projectInterface?.agent);
+          const agentConfigs = normalizeAgentConfigs(projectInterface?.agent, basePath);
           if (agentConfigs && agentConfigs.length > 0) {
             await maaService.stopAgent(instanceId);
           }
@@ -263,7 +263,7 @@ function InstanceCard({ instanceId, instanceName, isActive, onSelect }: Instance
           }
 
           // 准备 Agent 配置（支持单个或多个 Agent）
-          const agentConfigs = normalizeAgentConfigs(projectInterface?.agent);
+          const agentConfigs = normalizeAgentConfigs(projectInterface?.agent, basePath);
 
           // PI v2.5.0: 构建 Agent 子进程环境变量
           const piEnvs = agentConfigs?.length
@@ -325,7 +325,7 @@ function InstanceCard({ instanceId, instanceName, isActive, onSelect }: Instance
           setIsStarting(false);
         } catch (err) {
           log.error(`[${instanceName}] 任务启动异常:`, err);
-          const failedAgentConfigs = normalizeAgentConfigs(projectInterface?.agent);
+          const failedAgentConfigs = normalizeAgentConfigs(projectInterface?.agent, basePath);
           if (failedAgentConfigs && failedAgentConfigs.length > 0) {
             try {
               await maaService.stopAgent(instanceId);

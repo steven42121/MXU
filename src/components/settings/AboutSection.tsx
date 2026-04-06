@@ -166,7 +166,7 @@ export function AboutSection() {
             </a>
             {' & '}
             <a
-              href="https://github.com/MistEO/MXU"
+              href="https://github.com/steven42121/mxu"
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent hover:underline"

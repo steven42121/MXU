@@ -148,7 +148,7 @@ export function DebugSection() {
       if (!savePath) return;
 
       const { invoke } = await import('@tauri-apps/api/core');
-      const backupPath = await invoke<string>('backup_personal_config', { savePath });
+      const backupPath = await invoke<string>('backup_personal_config', { save_path: savePath });
       loggers.ui.info('个人配置备份成功:', backupPath);
 
       const { revealItemInDir } = await import('@tauri-apps/plugin-opener');

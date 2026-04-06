@@ -22,7 +22,8 @@ function isTimeoutError(error: unknown): boolean {
 }
 
 async function stopAgentIfNeeded(instanceId: string) {
-  const agentConfigs = normalizeAgentConfigs(useAppStore.getState().projectInterface?.agent);
+  const state = useAppStore.getState();
+  const agentConfigs = normalizeAgentConfigs(state.projectInterface?.agent, state.basePath);
   if (!agentConfigs || agentConfigs.length === 0) {
     return;
   }

@@ -4,7 +4,10 @@
 
 use log::{info, warn};
 use tauri::Emitter;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    LazyLock,
+};
 
 use super::types::SystemInfo;
 use super::types::WebView2DirInfo;
@@ -15,6 +18,14 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 标记是否检测到可能缺少 VC++ 运行库
 static VCREDIST_MISSING: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+static INTEL_CPU_MODEL_RE: LazyLock<Result<regex::Regex, regex::Error>> =
+    LazyLock::new(|| regex::Regex::new(r"i[3579]-?(\d{3,5})"));
+
+#[cfg(target_os = "windows")]
+static RYZEN_CPU_MODEL_RE: LazyLock<Result<regex::Regex, regex::Error>> =
+    LazyLock::new(|| regex::Regex::new(r"ryzen\s*(?:[3579])?\s*(\d{3,4})"));
 
 /// 设置 VC++ 运行库缺失标记 (供内部调用)
 pub fn set_vcredist_missing(missing: bool) {
@@ -840,25 +851,45 @@ pub fn get_webview2_dir() -> WebView2DirInfo {
 /// 启动时检查系统性能并在需要时向前端广播通知（仅在第一次启动时执行）
 pub fn startup_performance_check_and_notify(app_handle: tauri::AppHandle) {
     // 尝试获取 data dir 标记，若已检查过则不重复
-    if let Ok(data_dir) = super::get_data_dir() {
-        let marker = std::path::Path::new(&data_dir).join(".performance_checked");
-        if marker.exists() {
+    let data_dir = match super::get_data_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            warn!(
+                "Skip startup_performance_check_and_notify: failed to get data dir: {}",
+                err
+            );
             return;
         }
+    };
 
-        // 执行检查
-        let result = perform_performance_check();
+    let marker = std::path::Path::new(&data_dir).join(".performance_checked");
+    if marker.exists() {
+        return;
+    }
 
-        // 标记为已检查（即使检查失败也写入文件以避免重复弹窗）
-        let _ = std::fs::write(&marker, "1");
+    // 执行检查
+    let result = perform_performance_check();
 
-        // 若需要警告则通过事件发送给前端
-        if result.warn {
-            let _ = app_handle.emit("mxu:performance-warning", result.clone());
-            log::warn!("Startup performance warning: {:?}", result.reasons);
-        } else {
-            log::info!("Startup performance check passed");
-        }
+    // 标记为已检查（即使检查失败也尝试写入文件以避免重复弹窗）
+    if let Err(err) = std::fs::create_dir_all(&data_dir) {
+        warn!(
+            "Failed to create performance marker directory {}: {}",
+            data_dir, err
+        );
+    } else if let Err(err) = std::fs::write(&marker, "1") {
+        warn!(
+            "Failed to persist performance marker {}: {}",
+            marker.display(),
+            err
+        );
+    }
+
+    // 若需要警告则通过事件发送给前端
+    if result.warn {
+        let _ = app_handle.emit("mxu:performance-warning", result.clone());
+        log::warn!("Startup performance warning: {:?}", result.reasons);
+    } else {
+        log::info!("Startup performance check passed");
     }
 }
 
@@ -969,6 +1000,21 @@ fn perform_performance_check() -> super::types::PerformanceCheckResult {
             .args(["cpu", "get", "Name", "/format:csv"])
             .output()
         {
+            let intel_cpu_model_re = match INTEL_CPU_MODEL_RE.as_ref() {
+                Ok(re) => Some(re),
+                Err(err) => {
+                    warn!("Intel CPU regex compile failed: {}", err);
+                    None
+                }
+            };
+            let ryzen_cpu_model_re = match RYZEN_CPU_MODEL_RE.as_ref() {
+                Ok(re) => Some(re),
+                Err(err) => {
+                    warn!("Ryzen CPU regex compile failed: {}", err);
+                    None
+                }
+            };
+
             if output.status.success() {
                 if let Ok(txt) = String::from_utf8(output.stdout) {
                     for line in txt.lines() {
@@ -982,10 +1028,16 @@ fn perform_performance_check() -> super::types::PerformanceCheckResult {
                             if name_low.contains("intel") {
                                 if let Some(pos) = name_low.find('i') {
                                     let tail = &name_low[pos..];
-                                    if let Some(cap) = regex::Regex::new(r"i[3579]-?(\d{3,4})").unwrap().captures(tail) {
+                                    if let Some(cap) = intel_cpu_model_re.and_then(|re| re.captures(tail)) {
                                         if let Some(m) = cap.get(1) {
-                                            if let Ok(num) = m.as_str().parse::<i32>() {
-                                                let gen = if num >= 1000 { num / 100 } else { num / 100 };
+                                            let model = m.as_str();
+                                            let gen = match model.len() {
+                                                5 => model[0..2].parse::<i32>().ok(),
+                                                4 => model[0..1].parse::<i32>().ok(),
+                                                3 => Some(1),
+                                                _ => None,
+                                            };
+                                            if let Some(gen) = gen {
                                                 if gen < 6 {
                                                     reasons.push(format!("CPU 代数过低: {}", parts[1].trim()));
                                                 }
@@ -994,7 +1046,7 @@ fn perform_performance_check() -> super::types::PerformanceCheckResult {
                                     }
                                 }
                             } else if name_low.contains("ryzen") {
-                                if let Some(cap) = regex::Regex::new(r"ryzen\s*(?:[3579])?\s*(\d{3,4})").unwrap().captures(&name_low) {
+                                if let Some(cap) = ryzen_cpu_model_re.and_then(|re| re.captures(&name_low)) {
                                     if let Some(m) = cap.get(1) {
                                         if let Ok(num) = m.as_str().parse::<i32>() {
                                             if num < 3000 {
@@ -1026,4 +1078,5 @@ fn perform_performance_check() -> super::types::PerformanceCheckResult {
     let warn = !reasons.is_empty();
     PerformanceCheckResult { warn, reasons }
 }
+
 

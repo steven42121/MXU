@@ -711,19 +711,51 @@ pub fn restore_personal_config(backup_path: String) -> Result<(), String> {
         return Err("备份包中未找到可恢复的配置文件".to_string());
     }
 
+    let mut backup_old_config_dir: Option<PathBuf> = None;
     if config_dir.exists() {
-        std::fs::remove_dir_all(&config_dir)
-            .map_err(|e| format!("清理旧配置目录失败 [{}]: {}", config_dir.display(), e))?;
+        let backup_dir = cache_dir.join(format!("config-before-restore-{}", ts));
+        std::fs::rename(&config_dir, &backup_dir).map_err(|e| {
+            format!(
+                "备份旧配置目录失败 [{}] -> [{}]: {}",
+                config_dir.display(),
+                backup_dir.display(),
+                e
+            )
+        })?;
+        backup_old_config_dir = Some(backup_dir);
     }
 
-    std::fs::rename(&temp_extract_dir, &config_dir).map_err(|e| {
-        format!(
+    if let Err(e) = std::fs::rename(&temp_extract_dir, &config_dir) {
+        // 回滚：若新配置替换失败，尽力恢复旧配置
+        if let Some(old_backup_dir) = backup_old_config_dir {
+            match std::fs::rename(&old_backup_dir, &config_dir) {
+                Ok(()) => {
+                    return Err(format!(
+                        "替换配置目录失败，已回滚旧配置 [{}] -> [{}]: {}",
+                        temp_extract_dir.display(),
+                        config_dir.display(),
+                        e
+                    ));
+                }
+                Err(rollback_err) => {
+                    return Err(format!(
+                        "替换配置目录失败且回滚失败: {}；回滚错误: {}",
+                        e, rollback_err
+                    ));
+                }
+            }
+        }
+        return Err(format!(
             "替换配置目录失败 [{}] -> [{}]: {}",
             temp_extract_dir.display(),
             config_dir.display(),
             e
-        )
-    })?;
+        ));
+    }
+
+    if let Some(old_backup_dir) = backup_old_config_dir {
+        log::info!("旧配置已备份到: {}", old_backup_dir.display());
+    }
 
     log::info!(
         "个人配置恢复完成：{} 个文件 <- {}",
